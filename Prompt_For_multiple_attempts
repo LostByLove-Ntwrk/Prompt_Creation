@@ -1,0 +1,74 @@
+#----------------
+# Popup for USER
+# Change (program) to the specified program you need it to work for.
+#----------------
+    $taskName = "(program)Prompt"
+    $scriptPath = "$env:ProgramData\(program)Prompt.ps1"
+    
+#----------------------------------
+# This script runs in USER Session
+# Change "YesNo" to "Ok" to make it a no reject prompt. Delete yes and no options.
+#----------------------------------
+
+@'
+Add-Type -AssemblyName PresentationFramework
+
+$mutex = New-Object System.Threading.Mutex($false, "(program)Prompt")
+if (-not $mutex.WaitOne(0)) { exit 1 }
+
+$result = [System.Windows.MessageBox]::Show(
+    "The (program) install is needed.`n`nStart Now?",
+    "(program) Update", 
+    [System.Windows.MessageBoxButton]::YesNo,
+    [System.Windows.MessageBoxImage]::Warning
+)
+
+# Cleanup task
+schtasks /Delete /TN "(program)Prompt" /F | Out-Null
+
+$mutex.ReleaseMutex()
+
+# YES = continue install
+if ($result -eq [System.Windows.MessageBoxResult]::Yes) {
+    exit 0
+}
+
+# NO = cancel install
+exit 1
+
+'@ | Set-Content -Path $scriptPath -Encoding UTF8
+
+#-------------------
+# Run at USER LOGON
+#-------------------
+
+$currentUser = (Get-CimInstance Win32_ComputerSystem).UserName
+
+#------------------------------
+# Create scheduled task action
+#------------------------------
+
+$action = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`""
+
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+
+$principal = New-ScheduledTaskPrincipal `
+    -UserId $currentUser `
+    -LogonType Interactive `
+    -RunLevel Highest
+
+Register-ScheduledTask `
+    -TaskName $taskName `
+    -Action $action `
+    -Trigger $trigger `
+    -Principal $principal `
+    -Force | Out-Null
+
+#---------------------------
+# Launch popup if Logged in
+#---------------------------
+
+Start-ScheduledTask -TaskName $taskName
+
+    Write-Host "(program) update prompt deployed to user session."
